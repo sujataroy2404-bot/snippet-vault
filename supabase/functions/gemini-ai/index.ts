@@ -1,5 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+import { GoogleGenAI } from "npm:@google/genai@0.7.0";
+
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -30,6 +33,11 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+<<<<<<< HEAD
+=======
+    const ai = new GoogleGenAI({ apiKey });
+
+>>>>>>> 4627ef86663573dea1b748de50c504ff1d9468b9
     const prompt = `You are an expert developer assistant. Analyze the following ${language || ""} code snippet and respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
 
 {
@@ -46,6 +54,7 @@ Requirements:
 Code snippet:
 ${code}`;
 
+<<<<<<< HEAD
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
@@ -71,6 +80,18 @@ ${code}`;
 
     const geminiData = await response.json();
     const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+=======
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+      config: {
+        temperature: 0.3,
+        maxOutputTokens: 256,
+      },
+    });
+
+    const text = response.text;
+>>>>>>> 4627ef86663573dea1b748de50c504ff1d9468b9
 
     if (!text) {
       return new Response(
