@@ -1,26 +1,41 @@
+
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-
 import { GoogleGenAI } from "npm:@google/genai@0.7.0";
-
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response("ok", {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
+  const jsonHeaders = {
+    ...corsHeaders,
+    "Content-Type": "application/json",
+  };
+
   try {
+    if (req.method !== "POST") {
+      return new Response(
+        JSON.stringify({ error: "Method not allowed" }),
+        { status: 405, headers: jsonHeaders }
+      );
+    }
+
     const { code, language } = await req.json();
 
     if (!code || typeof code !== "string") {
       return new Response(
-        JSON.stringify({ error: "Missing or invalid 'code' field" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Missing or invalid code" }),
+        { status: 400, headers: jsonHeaders }
       );
     }
 
@@ -28,109 +43,101 @@ Deno.serve(async (req: Request) => {
 
     if (!apiKey) {
       return new Response(
-        JSON.stringify({ error: "AI service is not configured. GEMINI_API_KEY secret is missing." }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: "GEMINI_API_KEY secret is missing in Supabase",
+        }),
+        { status: 503, headers: jsonHeaders }
       );
     }
 
-<<<<<<< HEAD
-=======
     const ai = new GoogleGenAI({ apiKey });
 
->>>>>>> 4627ef86663573dea1b748de50c504ff1d9468b9
-    const prompt = `You are an expert developer assistant. Analyze the following ${language || ""} code snippet and respond with ONLY a valid JSON object (no markdown, no code fences) in this exact format:
+    const prompt = `Analyze this ${language || ""} code snippet.
 
-{
-  "tags": ["tag1", "tag2", "tag3"],
-  "summary": "A one-sentence plain-English description of what the code does."
-}
+Return only a valid JSON object in this format:
+{"tags":["tag1","tag2","tag3"],"summary":"One concise sentence explaining the code."}
 
 Requirements:
-- Generate 3 to 5 relevant tags (lowercase, no # prefix).
-- Tags should relate to the language, framework, or concepts used.
-- The summary must be a single concise sentence.
-- Return ONLY the JSON object, nothing else.
+- Generate 3 to 5 relevant lowercase tags without #.
+- The summary must be one concise sentence.
+- Return only JSON, without Markdown fences.
 
 Code snippet:
 ${code}`;
 
-<<<<<<< HEAD
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 256,
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errText = await response.text();
-      return new Response(
-        JSON.stringify({ error: `Gemini API error: ${response.status}`, detail: errText }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const geminiData = await response.json();
-    const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-=======
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+    const result = await ai.models.generateContent({
+      model: "gemini-3.5-flash-lite",
       contents: prompt,
       config: {
         temperature: 0.3,
-        maxOutputTokens: 256,
+        maxOutputTokens: 512,
+        responseMimeType: "application/json",
       },
     });
 
-    const text = response.text;
->>>>>>> 4627ef86663573dea1b748de50c504ff1d9468b9
+    const text = result.text;
 
     if (!text) {
       return new Response(
-        JSON.stringify({ error: "Empty response from AI service" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Empty response from Gemini" }),
+        { status: 502, headers: jsonHeaders }
       );
     }
+
+    const cleaned = text
+      .replace(/```json\s*/gi, "")
+      .replace(/```/g, "")
+      .trim();
 
     let parsed: { tags: string[]; summary: string };
+
     try {
-      const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      parsed = JSON.parse(cleaned);
-    } catch {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      } else {
-        return new Response(
-          JSON.stringify({ error: "Could not parse AI response" }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      const start = cleaned.indexOf("{");
+      const end = cleaned.lastIndexOf("}");
+
+      if (start === -1 || end === -1 || end < start) {
+        throw new Error("No JSON object found in Gemini response");
       }
+
+      parsed = JSON.parse(cleaned.slice(start, end + 1));
+    } catch {
+      return new Response(
+        JSON.stringify({
+          error: "Could not parse Gemini response",
+          detail: cleaned.slice(0, 1000),
+        }),
+        { status: 502, headers: jsonHeaders }
+      );
     }
 
-    if (!parsed.tags || !Array.isArray(parsed.tags) || !parsed.summary) {
+    if (
+      !Array.isArray(parsed.tags) ||
+      !parsed.tags.every((tag) => typeof tag === "string") ||
+      typeof parsed.summary !== "string" ||
+      !parsed.summary.trim()
+    ) {
       return new Response(
         JSON.stringify({ error: "Invalid AI response format" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 502, headers: jsonHeaders }
       );
     }
 
     return new Response(
-      JSON.stringify({ tags: parsed.tags.slice(0, 5), summary: parsed.summary }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        tags: parsed.tags.slice(0, 5),
+        summary: parsed.summary.trim(),
+      }),
+      { status: 200, headers: jsonHeaders }
     );
   } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Internal server error";
+
+    console.error("Gemini AI function error:", message);
+
     return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: message }),
+      { status: 500, headers: jsonHeaders }
     );
   }
 });

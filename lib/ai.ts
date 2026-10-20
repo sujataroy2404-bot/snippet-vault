@@ -19,9 +19,10 @@ export async function generateAITags(code: string, language: string): Promise<AI
   const response = await fetch(`${supabaseUrl}/functions/v1/gemini-ai`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${token}`,
+  apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+},
     body: JSON.stringify({ code, language }),
   });
 
